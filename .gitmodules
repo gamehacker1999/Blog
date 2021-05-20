@@ -1,0 +1,4 @@
+[submodule "ShubhamSachdevaBlog/public"]
+	path = ShubhamSachdevaBlog/public
+	url = https://github.com/gamehacker1999/gamehacker1999.github.io.git
+	branch = main
