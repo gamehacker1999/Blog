@@ -11,20 +11,20 @@ externalLink : ""
 series: []
 ---
 
-Getting Dynamic Real-Time diffuse global illumination is still an open problem. Recent developments by McGuire et al.[1] and Lumen in Unreal Engine 5 seem to provide believable real time global illumination. However this methods are very expensive and cannot support lower or even mid ranged hardware, or do so with significant performance costs. Even so, we have seen both of these technologies in action, Metro Exodus: Enhanced Edition used a version of the DDGI solution and the UE5 demoes "Lumen in the land of Nanite" and "The Matrix Awakens" both ran Lumen alongside their fantastic micropolygon geomtry solution Nanite[2].
+Getting Dynamic Real-Time diffuse global illumination is still an open problem. Recent developments by McGuire et al.[1] and Lumen in Unreal Engine 5 seem to provide believable real time global illumination. However these methods are very expensive and cannot support lower or even mid ranged hardware, or do so with significant performance costs. Even so, we have seen both of these technologies in action, Metro Exodus: Enhanced Edition used a version of the DDGI solution and the UE5 demos "Lumen in the land of Nanite" and "The Matrix Awakens" both ran Lumen alongside their fantastic micropolygon geomtry solution Nanite[2].
 
 In this post I want to take a step back and talk about an implementation which doesn't require specialized hardware for raytracing, and instead uses a screen-space solution to generate fast real-time indirect lighting, whilst also tries to minimize the noise.
 
 # Dynamic Screen Space Global Illumination
-I decided to use screen space ray tracing in order to capture the real time diffuse lighting of the scene. In environments that permit ray tracing such as movies or games running or very high end GPUs, each frame rays are sent from the object in random directions within the cosine weighted hemisphere oriented along the normal of the object. These rays capture scene light whenever they hit something and are appropriately weighted and added to the lighting of the object giving the object more realistic lighting within an environment. For this algorithm I will be using the same concept, but instead of tracing the rays against the entire scene I will only be doing so in screen space, that is, whatever is visible on the scene. This algorithm is implemented in multiple steps.
+I decided to use screen space ray tracing in order to capture the real time diffuse lighting of the scene. In environments that permit ray tracing such as movies or games running or very high end GPUs, each frame rays are sent from the object in random directions within the cosine weighted hemisphere oriented along the normal of the object. These rays capture scene light whenever they hit something are appropriately weighted and added to the lighting of the object giving it more realistic lighting within an environment. For this algorithm I will be using the same concept, but instead of tracing the rays against the entire scene I will only be doing so in screen space, that is, whatever is visible on the scene. This algorithm is implemented in multiple steps.
 
 ## Step 1 - Generating Stochastic Normals
-The first step is to get the direction in which we would like to trace the rays in. Since we need to render this algorithm in real time, we can only afford one ray per pixel instead of the thousands that would be required to get a noise free result. To get the directions, we start with the normal buffer. This can either be created during the GBuffer creation pass or can be computed using pixel derivatives in using the depth buffer as shown in [3]. Once we have the normals we want to generate direction in the cosine weighted hemishphere oriented along it (See appendix for all the code/pseudocode for the implementations). Once we have this direction we store it in a 2D texture which should look something like this (note, I am using Interleaved Gradient Noise for the directions since it works well with TAA); 
+The first step is to get the direction in which we would like to trace the rays. Since we need to render this algorithm in real time, we can only afford one ray per pixel instead of the thousands that would be required to get a noise free result. To get the directions, we start with the normal buffer. This can either be created during the GBuffer creation pass or can be computed using pixel derivatives in using the depth buffer as shown in [3]. Once we have the normals we want to generate a direction in the cosine weighted hemishphere oriented along it (See appendix for all the code/pseudocode implementations). Once we have this direction we store it in a 2D texture which should look something like this (note, I am using Interleaved Gradient Noise for the directions since it works well with TAA).
 
 ![Figure 1](/posts/SSGI/NoisyNormals.PNG)
 
 ## Step 2 - Screen Space RayMarching
-The second step is actually tracing the rays and screen space and accumilating the diffuse lighting in the scene. In this pass we will start from the world position of the fragment, either from the GBuffer or can be reconstructed from the depth buffer using the inverse of the view projection matrix. There are plenty of raymarching techniques so naturally I went for the simplest one :). I find the ray start from the screen position in screen space. The ray direction is direction that we get from the previous direction. That direction is multiplied by the view matrix and then the projection matrix to get the ray dir in screen space. Then we ray march the ray based on arbitrary step size of our chosen (newPos = raystart+rayDir*step) and the check the depth buffer at the new position. I the depth of the sample is less that the depth buffer value at that position, that means we have a hit and we store the sample position and a mask that tells us if we couldn't find a hit. We use this sample position to sample the color of the scene at that location, this color is the final image of the previous frame, and this will be our diffuse lighting source. Using the above normals the diffuse lighting should look something like this. 
+The second step is actually tracing the rays and screen space and accumulating the diffuse lighting in the scene. In this pass we will start from the world position of the fragment, either from the GBuffer or can be reconstructed from the depth buffer using the inverse of the view projection matrix. There are plenty of raymarching techniques so naturally I went for the simplest one :). I find the ray start from the screen position in screen space. The ray direction is direction that we get from the previous pass. That direction is multiplied by the view matrix and then the projection matrix to get the ray dir in screen space. Then we march the ray based on arbitrary step size of our chosing(newPos = raystart+rayDir*step) and the check the depth buffer at the new position. If the depth of the sample is less that the depth buffer value at that position, that means we have a hit and we store the sample position and a mask that tells us if we couldn't find a hit. We use this sample position to sample the color of the scene at that location which we get from the previous frame, and will be our diffuse lighting source. Using the above normals the diffuse lighting should look something like this. 
 
 ![Figure 2](/posts/SSGI/Noisy%20Illumination.PNG)
 
@@ -120,9 +120,6 @@ float3 GetCosHemisphereSample(float rand1, float rand2, float3 hitNorm)
 		float stepSize = (1.0 / (float)stepCount);
 		stepSize = stepSize * (jitter.x + jitter.y) + stepSize;
 
-		float2 rayTraceHit = 0.0;
-		float rayTraceZ = 0.0;
-		float rayPDF = 0.0;
 		float rayMask = 0.0;
 		float4 rayTrace = RayMarch(depthBuffer, projectionMatrix, dir, stepCount, viewPos, screenPos, uv, stepSize, 1.0);
 
@@ -145,7 +142,7 @@ This is the different denoising steps that I took to reach the final image. I am
 
 <img src="/posts/SSGI/Downsample1.PNG" alt="drawing" width="1094" height = "518"/>
 
-### Downsample Step 2 (uarter Res Res)
+### Downsample Step 2 (Quarter Res)
 
 <img src="/posts/SSGI/Downsample2.PNG" alt="drawing" width="1094" height = "518"/>
 
